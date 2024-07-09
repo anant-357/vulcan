@@ -1,18 +1,29 @@
 use std::sync::Arc;
 
 use vulkano::{
+    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
     instance::{Instance, InstanceCreateInfo},
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     VulkanLibrary,
 };
 
-pub struct Graphics {
+pub struct Graphics<T>
+where
+    T: BufferContents,
+{
     device: Arc<Device>,
     queue: Arc<Queue>,
+    mem_alloc: Arc<StandardMemoryAllocator>,
+    source: Option<Subbuffer<[T]>>,
+    destination: Option<Subbuffer<[T]>>,
 }
 
-impl Graphics {
-    pub fn init() -> Self {
+impl<T> Graphics<T>
+where
+    T: BufferContents,
+{
+    pub fn init() -> Result<Self, String> {
         let lib = VulkanLibrary::new().expect("Failed to find local vulkan!");
         let instance =
             Instance::new(lib, InstanceCreateInfo::default()).expect("Failed to create instance");
@@ -46,8 +57,52 @@ impl Graphics {
         )
         .expect("Failed to create device");
         let queue = queues.next().unwrap();
+        let mem_alloc = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-        Self { device, queue }
+        Ok(Self {
+            device,
+            queue,
+            mem_alloc,
+            source: None,
+            destination: None,
+        })
+    }
+
+    pub fn set_source_buffer(&mut self, source_content: Vec<T>) {
+        let source = Buffer::from_iter(
+            self.mem_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            source_content,
+        )
+        .expect("failed to create source buffer");
+
+        self.source = Some(source);
+    }
+
+    pub fn set_destination_buffer(&mut self, destination_content: Vec<T>) {
+        let destination = Buffer::from_iter(
+            self.mem_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_DST,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_RANDOM_ACCESS,
+                ..Default::default()
+            },
+            destination_content,
+        )
+        .expect("failed to create destination buffer");
+        self.destination = Some(destination);
     }
 
     pub fn get_device(&self) -> Arc<Device> {
