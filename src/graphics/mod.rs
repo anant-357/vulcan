@@ -33,6 +33,8 @@ pub struct Graphics
 //     T: BufferContents + Debug + Eq,
 //     Rgba<T>: Pixel,
 {
+    width: u32,
+    height: u32,
     device: Arc<Device>,
     queue: Arc<Queue>,
     mem_alloc: Arc<StandardMemoryAllocator>,
@@ -43,7 +45,7 @@ pub struct Graphics
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
     compute_pipeline: Option<Arc<ComputePipeline>>,
-    descriptor_set: Option<u32>,
+    descriptor_set: Option<Arc<PersistentDescriptorSet>>,
 }
 
 impl Graphics
@@ -52,7 +54,7 @@ impl Graphics
 //     T: BufferContents + Debug + Eq,
 //     Rgba<T>: Pixel,
 {
-    pub fn init() -> Result<Self, String> {
+    pub fn init(width: u32, height: u32) -> Result<Self, String> {
         let lib = VulkanLibrary::new().expect("Failed to find local vulkan!");
         let instance =
             Instance::new(lib, InstanceCreateInfo::default()).expect("Failed to create instance");
@@ -98,6 +100,8 @@ impl Graphics
         ));
 
         Ok(Self {
+            width,
+            height,
             device,
             queue,
             mem_alloc,
@@ -131,7 +135,7 @@ impl Graphics
         self.source = Some(source);
     }
 
-    pub fn set_destination_buffer(&mut self, destination_content: Vec<u8>) {
+    pub fn set_destination_buffer(&mut self, destination_content: u32) {
         let destination = Buffer::from_iter(
             self.mem_alloc.clone(),
             BufferCreateInfo {
@@ -143,7 +147,7 @@ impl Graphics
                     | MemoryTypeFilter::HOST_RANDOM_ACCESS,
                 ..Default::default()
             },
-            destination_content,
+            (0..self.width * self.height * destination_content).map(|_| 0u8),
         )
         .expect("failed to create destination buffer");
         self.destination = Some(destination);
@@ -155,8 +159,8 @@ impl Graphics
             ImageCreateInfo {
                 image_type: vulkano::image::ImageType::Dim2d,
                 format: vulkano::format::Format::R8G8B8A8_UNORM,
-                extent: [1024, 1024, 1],
-                usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
+                extent: [self.width, self.height, 1],
+                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -167,6 +171,35 @@ impl Graphics
         .unwrap();
 
         self.image = Some(image);
+    }
+
+    pub fn set_descriptor_set_copy_to_buffer_command_buffer(&mut self) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_alloc,
+            self.queue.queue_family_index(),
+            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .bind_pipeline_compute(self.compute_pipeline.clone().unwrap())
+            .unwrap()
+            .bind_descriptor_sets(
+                vulkano::pipeline::PipelineBindPoint::Compute,
+                self.compute_pipeline.clone().unwrap().layout().clone(),
+                0,
+                self.descriptor_set.clone().unwrap(),
+            )
+            .unwrap()
+            .dispatch([self.width / 8, self.height / 8, 1])
+            .unwrap()
+            .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                self.image.clone().unwrap(),
+                self.destination.clone().unwrap(),
+            ))
+            .unwrap();
+
+        self.command = Some(builder.build().unwrap());
     }
 
     pub fn set_clear_image_copy_to_buffer_command_buffer(&mut self, color: ClearColorValue) {
@@ -247,7 +280,9 @@ impl Graphics
     pub fn save_image(&mut self, file_name: &str) {
         let binding = self.destination.clone().unwrap();
         let buffer_content = binding.read().unwrap();
-        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..]).unwrap();
+        let image =
+            ImageBuffer::<Rgba<u8>, _>::from_raw(self.width, self.height, &buffer_content[..])
+                .unwrap();
         image.save(file_name).unwrap();
     }
 
