@@ -1,5 +1,6 @@
 use std::{fmt::Debug, sync::Arc};
 
+use image::{ImageBuffer, Pixel, Rgba};
 use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -16,23 +17,27 @@ use vulkano::{
     VulkanLibrary,
 };
 
-pub struct Graphics<T>
-where
-    T: BufferContents + Debug + Eq,
+pub struct Graphics
+// <T>
+// where
+//     T: BufferContents + Debug + Eq,
+//     Rgba<T>: Pixel,
 {
     device: Arc<Device>,
     queue: Arc<Queue>,
     mem_alloc: Arc<StandardMemoryAllocator>,
     command_buffer_alloc: Arc<StandardCommandBufferAllocator>,
-    source: Option<Subbuffer<[T]>>,
-    destination: Option<Subbuffer<[T]>>,
+    source: Option<Subbuffer<[u8]>>,
+    destination: Option<Subbuffer<[u8]>>,
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
 }
 
-impl<T> Graphics<T>
-where
-    T: BufferContents + Debug + Eq,
+impl Graphics
+// <T>
+// where
+//     T: BufferContents + Debug + Eq,
+//     Rgba<T>: Pixel,
 {
     pub fn init() -> Result<Self, String> {
         let lib = VulkanLibrary::new().expect("Failed to find local vulkan!");
@@ -87,7 +92,7 @@ where
         })
     }
 
-    pub fn set_source_buffer(&mut self, source_content: Vec<T>) {
+    pub fn set_source_buffer(&mut self, source_content: Vec<u8>) {
         let source = Buffer::from_iter(
             self.mem_alloc.clone(),
             BufferCreateInfo {
@@ -106,7 +111,7 @@ where
         self.source = Some(source);
     }
 
-    pub fn set_destination_buffer(&mut self, destination_content: Vec<T>) {
+    pub fn set_destination_buffer(&mut self, destination_content: Vec<u8>) {
         let destination = Buffer::from_iter(
             self.mem_alloc.clone(),
             BufferCreateInfo {
@@ -218,7 +223,12 @@ where
         println!("Everything succeeded!");
     }
 
-    pub fn save_image(&self) {}
+    pub fn save_image(&mut self, file_name: &str) {
+        let binding = self.destination.clone().unwrap();
+        let buffer_content = binding.read().unwrap();
+        let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &buffer_content[..]).unwrap();
+        image.save(file_name).unwrap();
+    }
 
     pub fn get_device(&self) -> Arc<Device> {
         self.device.clone()
