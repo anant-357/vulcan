@@ -11,14 +11,17 @@ use vulkano::{
         AutoCommandBufferBuilder, ClearColorImageInfo, CopyImageToBufferInfo,
         PrimaryAutoCommandBuffer,
     },
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+    },
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
     format::ClearColorValue,
-    image::{Image, ImageCreateInfo, ImageUsage},
+    image::{view::ImageView, Image, ImageCreateInfo, ImageUsage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         compute::ComputePipelineCreateInfo, layout::PipelineDescriptorSetLayoutCreateInfo,
-        ComputePipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+        ComputePipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
     },
     sync::{self, GpuFuture},
     VulkanLibrary,
@@ -34,11 +37,13 @@ pub struct Graphics
     queue: Arc<Queue>,
     mem_alloc: Arc<StandardMemoryAllocator>,
     command_buffer_alloc: Arc<StandardCommandBufferAllocator>,
+    descriptor_set_alloc: Arc<StandardDescriptorSetAllocator>,
     source: Option<Subbuffer<[u8]>>,
     destination: Option<Subbuffer<[u8]>>,
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
     compute_pipeline: Option<Arc<ComputePipeline>>,
+    descriptor_set: Option<u32>,
 }
 
 impl Graphics
@@ -87,17 +92,23 @@ impl Graphics
             device.clone(),
             StandardCommandBufferAllocatorCreateInfo::default(),
         ));
+        let descriptor_set_alloc = Arc::new(StandardDescriptorSetAllocator::new(
+            device.clone(),
+            Default::default(),
+        ));
 
         Ok(Self {
             device,
             queue,
             mem_alloc,
             command_buffer_alloc,
+            descriptor_set_alloc,
             source: None,
             destination: None,
             command: None,
             image: None,
             compute_pipeline: None,
+            descriptor_set: None,
         })
     }
 
@@ -158,23 +169,6 @@ impl Graphics
         self.image = Some(image);
     }
 
-    pub fn set_clear_image_command_buffer(&mut self, color: ClearColorValue) {
-        let mut builder = AutoCommandBufferBuilder::primary(
-            &self.command_buffer_alloc,
-            self.queue.queue_family_index(),
-            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        builder
-            .clear_color_image(ClearColorImageInfo {
-                clear_value: color,
-                ..ClearColorImageInfo::image(self.image.clone().unwrap().clone())
-            })
-            .unwrap();
-        self.command = Some(builder.build().unwrap());
-    }
-
     pub fn set_clear_image_copy_to_buffer_command_buffer(&mut self, color: ClearColorValue) {
         let mut builder = AutoCommandBufferBuilder::primary(
             &self.command_buffer_alloc,
@@ -216,6 +210,21 @@ impl Graphics
         )
         .expect("failed to create compute pipeline");
         self.compute_pipeline = Some(compute_pipeline);
+    }
+
+    pub fn add_descriptor_set_for_image(&mut self) {
+        let view = ImageView::new_default(self.image.clone().unwrap()).unwrap();
+        let binding = self.compute_pipeline.clone().unwrap();
+        let layout = binding.layout().set_layouts().get(0).unwrap();
+        let set = PersistentDescriptorSet::new(
+            &self.descriptor_set_alloc,
+            layout.clone(),
+            [WriteDescriptorSet::image_view(0, view.clone())],
+            [],
+        )
+        .unwrap();
+
+        self.descriptor_set = Some(set);
     }
 
     pub fn sync(&self) {
