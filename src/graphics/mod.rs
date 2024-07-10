@@ -7,6 +7,7 @@ use vulkano::{
         AutoCommandBufferBuilder, CopyBufferInfo, PrimaryAutoCommandBuffer,
     },
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
+    image::{Image, ImageCreateInfo, ImageUsage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     sync::{self, GpuFuture},
@@ -25,6 +26,7 @@ where
     source: Option<Subbuffer<[T]>>,
     destination: Option<Subbuffer<[T]>>,
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
+    image: Option<Arc<Image>>,
 }
 
 impl<T> Graphics<T>
@@ -81,6 +83,7 @@ where
             source: None,
             destination: None,
             command: None,
+            image: None,
         })
     }
 
@@ -121,7 +124,27 @@ where
         self.destination = Some(destination);
     }
 
-    pub fn set_command_buffer(&mut self) {
+    pub fn create_image(&mut self) {
+        let image = Image::new(
+            self.mem_alloc.clone(),
+            ImageCreateInfo {
+                image_type: vulkano::image::ImageType::Dim2d,
+                format: vulkano::format::Format::R8G8B8A8_UNORM,
+                extent: [1024, 1024, 1],
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        self.image = Some(image);
+    }
+
+    pub fn set_copy_command_buffer(&mut self) {
         let mut builder = AutoCommandBufferBuilder::primary(
             &self.command_buffer_alloc,
             self.queue_family_index,
