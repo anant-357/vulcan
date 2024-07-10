@@ -1,11 +1,14 @@
-use std::{fmt::Debug, sync::Arc};
+mod mandel_brot;
 
-use image::{ImageBuffer, Pixel, Rgba};
+use std::sync::Arc;
+
+use image::{ImageBuffer, Rgba};
+use mandel_brot::shader;
 use vulkano::{
-    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
+    buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
         allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
-        AutoCommandBufferBuilder, ClearColorImageInfo, CopyBufferInfo, CopyImageToBufferInfo,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CopyImageToBufferInfo,
         PrimaryAutoCommandBuffer,
     },
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
@@ -13,6 +16,10 @@ use vulkano::{
     image::{Image, ImageCreateInfo, ImageUsage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::{
+        compute::ComputePipelineCreateInfo, layout::PipelineDescriptorSetLayoutCreateInfo,
+        ComputePipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+    },
     sync::{self, GpuFuture},
     VulkanLibrary,
 };
@@ -31,6 +38,7 @@ pub struct Graphics
     destination: Option<Subbuffer<[u8]>>,
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
+    compute_pipeline: Option<Arc<ComputePipeline>>,
 }
 
 impl Graphics
@@ -89,6 +97,7 @@ impl Graphics
             destination: None,
             command: None,
             image: None,
+            compute_pipeline: None,
         })
     }
 
@@ -188,22 +197,25 @@ impl Graphics
         self.command = Some(builder.build().unwrap());
     }
 
-    pub fn set_copy_command_buffer(&mut self) {
-        let mut builder = AutoCommandBufferBuilder::primary(
-            &self.command_buffer_alloc,
-            self.queue.queue_family_index(),
-            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+    pub fn set_compute_pipeline(&mut self) {
+        let mb_shader = shader::load(self.device.clone()).expect("failed to create shader module");
+        let cs = mb_shader.entry_point("main").unwrap();
+        let stage = PipelineShaderStageCreateInfo::new(cs);
+        let layout = PipelineLayout::new(
+            self.device.clone(),
+            PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
+                .into_pipeline_layout_create_info(self.device.clone())
+                .unwrap(),
         )
-        .unwrap();
-        builder
-            .copy_buffer(CopyBufferInfo::buffers(
-                self.source.clone().expect("Source Buffer not set"),
-                self.destination
-                    .clone()
-                    .expect("Destination Buffer not set"),
-            ))
-            .unwrap();
-        self.command = Some(builder.build().unwrap());
+        .expect("failed to create pipeline layout");
+
+        let compute_pipeline = ComputePipeline::new(
+            self.device.clone(),
+            None,
+            ComputePipelineCreateInfo::stage_layout(stage, layout),
+        )
+        .expect("failed to create compute pipeline");
+        self.compute_pipeline = Some(compute_pipeline);
     }
 
     pub fn sync(&self) {
