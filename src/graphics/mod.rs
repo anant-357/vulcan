@@ -1,27 +1,35 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
+    command_buffer::{
+        allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
+        AutoCommandBufferBuilder, CopyBufferInfo, PrimaryAutoCommandBuffer,
+    },
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    sync::{self, GpuFuture},
     VulkanLibrary,
 };
 
 pub struct Graphics<T>
 where
-    T: BufferContents,
+    T: BufferContents + Debug + Eq,
 {
+    queue_family_index: u32,
     device: Arc<Device>,
     queue: Arc<Queue>,
     mem_alloc: Arc<StandardMemoryAllocator>,
+    command_buffer_alloc: Arc<StandardCommandBufferAllocator>,
     source: Option<Subbuffer<[T]>>,
     destination: Option<Subbuffer<[T]>>,
+    command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
 }
 
 impl<T> Graphics<T>
 where
-    T: BufferContents,
+    T: BufferContents + Debug + Eq,
 {
     pub fn init() -> Result<Self, String> {
         let lib = VulkanLibrary::new().expect("Failed to find local vulkan!");
@@ -43,13 +51,13 @@ where
                     .queue_flags
                     .contains(QueueFlags::GRAPHICS)
             })
-            .expect("No graphical queue family");
+            .expect("No graphical queue family") as u32;
 
         let (device, mut queues) = Device::new(
             physical_device,
             DeviceCreateInfo {
                 queue_create_infos: vec![QueueCreateInfo {
-                    queue_family_index: graphical_queue_family_index as u32,
+                    queue_family_index: graphical_queue_family_index,
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -59,12 +67,20 @@ where
         let queue = queues.next().unwrap();
         let mem_alloc = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
+        let command_buffer_alloc = Arc::new(StandardCommandBufferAllocator::new(
+            device.clone(),
+            StandardCommandBufferAllocatorCreateInfo::default(),
+        ));
+
         Ok(Self {
+            queue_family_index: graphical_queue_family_index,
             device,
             queue,
             mem_alloc,
+            command_buffer_alloc,
             source: None,
             destination: None,
+            command: None,
         })
     }
 
@@ -103,6 +119,41 @@ where
         )
         .expect("failed to create destination buffer");
         self.destination = Some(destination);
+    }
+
+    pub fn set_command_buffer(&mut self) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_alloc,
+            self.queue_family_index,
+            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+        builder
+            .copy_buffer(CopyBufferInfo::buffers(
+                self.source.clone().expect("Source Buffer not set"),
+                self.destination
+                    .clone()
+                    .expect("Destination Buffer not set"),
+            ))
+            .unwrap();
+        self.command = Some(builder.build().unwrap());
+    }
+
+    pub fn sync(&self) {
+        let future = sync::now(self.device.clone())
+            .then_execute(self.queue.clone(), self.command.clone().unwrap())
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap();
+        future.wait(None).unwrap();
+    }
+
+    pub fn verify(&self) {
+        assert_eq!(
+            &*self.source.clone().unwrap().read().unwrap(),
+            &*self.destination.clone().unwrap().read().unwrap()
+        );
+        println!("Everything succeeded!");
     }
 
     pub fn get_device(&self) -> Arc<Device> {
