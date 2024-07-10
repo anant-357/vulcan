@@ -4,9 +4,11 @@ use vulkano::{
     buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
         allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
-        AutoCommandBufferBuilder, CopyBufferInfo, PrimaryAutoCommandBuffer,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CopyBufferInfo, CopyImageToBufferInfo,
+        PrimaryAutoCommandBuffer,
     },
     device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags},
+    format::ClearColorValue,
     image::{Image, ImageCreateInfo, ImageUsage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
@@ -18,7 +20,6 @@ pub struct Graphics<T>
 where
     T: BufferContents + Debug + Eq,
 {
-    queue_family_index: u32,
     device: Arc<Device>,
     queue: Arc<Queue>,
     mem_alloc: Arc<StandardMemoryAllocator>,
@@ -75,7 +76,6 @@ where
         ));
 
         Ok(Self {
-            queue_family_index: graphical_queue_family_index,
             device,
             queue,
             mem_alloc,
@@ -144,10 +144,49 @@ where
         self.image = Some(image);
     }
 
+    pub fn set_clear_image_command_buffer(&mut self, color: ClearColorValue) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_alloc,
+            self.queue.queue_family_index(),
+            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .clear_color_image(ClearColorImageInfo {
+                clear_value: color,
+                ..ClearColorImageInfo::image(self.image.clone().unwrap().clone())
+            })
+            .unwrap();
+        self.command = Some(builder.build().unwrap());
+    }
+
+    pub fn set_clear_image_copy_to_buffer_command_buffer(&mut self, color: ClearColorValue) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_alloc,
+            self.queue.queue_family_index(),
+            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .clear_color_image(ClearColorImageInfo {
+                clear_value: color,
+                ..ClearColorImageInfo::image(self.image.clone().unwrap().clone())
+            })
+            .unwrap()
+            .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                self.image.clone().unwrap().clone(),
+                self.destination.clone().unwrap().clone(),
+            ))
+            .unwrap();
+        self.command = Some(builder.build().unwrap());
+    }
+
     pub fn set_copy_command_buffer(&mut self) {
         let mut builder = AutoCommandBufferBuilder::primary(
             &self.command_buffer_alloc,
-            self.queue_family_index,
+            self.queue.queue_family_index(),
             vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
         )
         .unwrap();
@@ -178,6 +217,8 @@ where
         );
         println!("Everything succeeded!");
     }
+
+    pub fn save_image(&self) {}
 
     pub fn get_device(&self) -> Arc<Device> {
         self.device.clone()
