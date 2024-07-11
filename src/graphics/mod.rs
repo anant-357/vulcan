@@ -1,9 +1,12 @@
 mod mandel_brot;
+pub mod vertex;
 
 use std::sync::Arc;
 
 use image::{ImageBuffer, Rgba};
-use mandel_brot::shader;
+use mandel_brot::mandel_brot_shader;
+use vertex::vertex_shader;
+use vertex::CustomVertex;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -42,6 +45,7 @@ pub struct Graphics
     descriptor_set_alloc: Arc<StandardDescriptorSetAllocator>,
     source: Option<Subbuffer<[u8]>>,
     destination: Option<Subbuffer<[u8]>>,
+    vertex: Option<Subbuffer<[CustomVertex]>>,
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
     compute_pipeline: Option<Arc<ComputePipeline>>,
@@ -109,6 +113,7 @@ impl Graphics
             descriptor_set_alloc,
             source: None,
             destination: None,
+            vertex: None,
             command: None,
             image: None,
             compute_pipeline: None,
@@ -151,6 +156,25 @@ impl Graphics
         )
         .expect("failed to create destination buffer");
         self.destination = Some(destination);
+    }
+
+    pub fn set_vertex_buffer(&mut self, vertex_content: Vec<CustomVertex>) {
+        let buffer = Buffer::from_iter(
+            self.mem_alloc.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            vertex_content,
+        )
+        .unwrap();
+
+        self.vertex = Some(buffer);
     }
 
     pub fn create_image(&mut self) {
@@ -225,7 +249,8 @@ impl Graphics
     }
 
     pub fn set_compute_pipeline(&mut self) {
-        let mb_shader = shader::load(self.device.clone()).expect("failed to create shader module");
+        let mb_shader =
+            mandel_brot_shader::load(self.device.clone()).expect("failed to create shader module");
         let cs = mb_shader.entry_point("main").unwrap();
         let stage = PipelineShaderStageCreateInfo::new(cs);
         let layout = PipelineLayout::new(

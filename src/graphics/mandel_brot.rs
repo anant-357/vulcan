@@ -1,4 +1,4 @@
-pub mod shader {
+pub mod mandel_brot_shader {
     vulkano_shaders::shader! {
         ty: "compute",
         src: r"
@@ -14,18 +14,18 @@ void main() {
 
     vec2 z = vec2(0.0, 0.0);
     float i;
-    for (i = 0.0; i < 1.0; i += 0.02) {
+    for (i = 0.0; i < 1.0; i += 0.05) {
         z = vec2(
             z.x * z.x - z.y * z.y + c.x,
             z.y * z.x + z.x * z.y + c.y
         );
 
-        if (length(z) > 4.0) {
+        if (length(z) > 2.5) {
             break;
         }
     }
 
-    vec4 to_write = vec4(vec3(i/2,i,0), 1.0);
+    vec4 to_write = vec4(vec3(i,i,0), 1.0);
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), to_write);
 }
         ",
