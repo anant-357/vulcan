@@ -8,6 +8,9 @@ use mandel_brot::mandel_brot_shader;
 use vertex::fragment_shader;
 use vertex::vertex_shader;
 use vertex::CustomVertex;
+use vulkano::command_buffer::RenderPassBeginInfo;
+use vulkano::command_buffer::SubpassBeginInfo;
+use vulkano::command_buffer::SubpassEndInfo;
 use vulkano::pipeline::graphics::color_blend::ColorBlendAttachmentState;
 use vulkano::pipeline::graphics::color_blend::ColorBlendState;
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
@@ -186,7 +189,9 @@ impl Graphics
                 image_type: vulkano::image::ImageType::Dim2d,
                 format: vulkano::format::Format::R8G8B8A8_UNORM,
                 extent: [self.width, self.height, 1],
-                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+                usage: ImageUsage::COLOR_ATTACHMENT
+                    | ImageUsage::STORAGE
+                    | ImageUsage::TRANSFER_SRC,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -247,6 +252,43 @@ impl Graphics
                 self.destination.clone().unwrap().clone(),
             ))
             .unwrap();
+        self.command = Some(builder.build().unwrap());
+    }
+
+    pub fn set_draw_image_copy_to_buffer_command(&mut self) {
+        let mut builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_alloc,
+            self.queue.queue_family_index(),
+            vulkano::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        builder
+            .begin_render_pass(
+                RenderPassBeginInfo {
+                    clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
+                    ..RenderPassBeginInfo::framebuffer(self.frame_buffer.clone().unwrap())
+                },
+                SubpassBeginInfo {
+                    contents: vulkano::command_buffer::SubpassContents::Inline,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .bind_pipeline_graphics(self.graphics_pipeline.clone().unwrap())
+            .unwrap()
+            .bind_vertex_buffers(0, self.vertex.clone().unwrap())
+            .unwrap()
+            .draw(3, 1, 0, 0)
+            .unwrap()
+            .end_render_pass(SubpassEndInfo::default())
+            .unwrap()
+            .copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+                self.image.clone().unwrap(),
+                self.destination.clone().unwrap(),
+            ))
+            .unwrap();
+
         self.command = Some(builder.build().unwrap());
     }
 
