@@ -7,6 +7,8 @@ use image::{ImageBuffer, Rgba};
 use mandel_brot::mandel_brot_shader;
 use vertex::vertex_shader;
 use vertex::CustomVertex;
+use vulkano::render_pass::Framebuffer;
+use vulkano::render_pass::RenderPass;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -50,6 +52,7 @@ pub struct Graphics
     image: Option<Arc<Image>>,
     compute_pipeline: Option<Arc<ComputePipeline>>,
     descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+    render_pass: Option<Arc<RenderPass>>,
 }
 
 impl Graphics
@@ -118,6 +121,7 @@ impl Graphics
             image: None,
             compute_pipeline: None,
             descriptor_set: None,
+            render_pass: None,
         })
     }
 
@@ -283,6 +287,39 @@ impl Graphics
         .unwrap();
 
         self.descriptor_set = Some(set);
+    }
+
+    pub fn add_render_pass(&mut self) {
+        let render_pass = vulkano::single_pass_renderpass!(
+            self.device.clone(),
+            attachments: {
+                color: {
+                    format: vulkano::format::Format::R8G8B8A8_UNORM,
+                    samples: 1,
+                    load_op: Clear,
+                    store_op: Store,
+                },
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {},
+            },
+        )
+        .unwrap();
+
+        self.render_pass = Some(render_pass);
+    }
+
+    pub fn add_framebuffer(&mut self) {
+        let view = ImageView::new_default(self.image.clone().unwrap()).unwrap();
+        let frame_buffer = Framebuffer::new(
+            self.render_pass.clone().unwrap(),
+            vulkano::render_pass::FramebufferCreateInfo {
+                attachments: vec![view],
+                ..Default::default()
+            },
+        )
+        .unwrap();
     }
 
     pub fn sync(&self) {
