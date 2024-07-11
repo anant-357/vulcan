@@ -7,6 +7,7 @@ use image::{ImageBuffer, Rgba};
 use mandel_brot::mandel_brot_shader;
 use vertex::vertex_shader;
 use vertex::CustomVertex;
+use vulkano::pipeline::GraphicsPipeline;
 use vulkano::render_pass::Framebuffer;
 use vulkano::render_pass::RenderPass;
 use vulkano::{
@@ -51,8 +52,10 @@ pub struct Graphics
     command: Option<Arc<PrimaryAutoCommandBuffer<Arc<StandardCommandBufferAllocator>>>>,
     image: Option<Arc<Image>>,
     compute_pipeline: Option<Arc<ComputePipeline>>,
+    graphics_pipeline: Option<Arc<GraphicsPipeline>>,
     descriptor_set: Option<Arc<PersistentDescriptorSet>>,
     render_pass: Option<Arc<RenderPass>>,
+    frame_buffer: Option<Arc<Framebuffer>>,
 }
 
 impl Graphics
@@ -122,6 +125,7 @@ impl Graphics
             compute_pipeline: None,
             descriptor_set: None,
             render_pass: None,
+            frame_buffer: None,
         })
     }
 
@@ -320,6 +324,7 @@ impl Graphics
             },
         )
         .unwrap();
+        self.frame_buffer = Some(frame_buffer);
     }
 
     pub fn sync(&self) {
