@@ -8,7 +8,7 @@ fn main() {
         gfx.get_device(),
         gfx.get_queue()
     );
-    gfx.set_compute_pipeline();
+    gfx.set_graphics_pipeline();
     gfx.create_image();
     gfx.add_descriptor_set_for_image();
     // gfx.set_source_buffer((0..64).collect());

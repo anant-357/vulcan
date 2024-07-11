@@ -5,11 +5,23 @@ use std::sync::Arc;
 
 use image::{ImageBuffer, Rgba};
 use mandel_brot::mandel_brot_shader;
+use vertex::fragment_shader;
 use vertex::vertex_shader;
 use vertex::CustomVertex;
+use vulkano::pipeline::graphics::color_blend::ColorBlendAttachmentState;
+use vulkano::pipeline::graphics::color_blend::ColorBlendState;
+use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
+use vulkano::pipeline::graphics::multisample::MultisampleState;
+use vulkano::pipeline::graphics::rasterization::RasterizationState;
+use vulkano::pipeline::graphics::vertex_input::Vertex;
+use vulkano::pipeline::graphics::vertex_input::VertexDefinition;
+use vulkano::pipeline::graphics::viewport::Viewport;
+use vulkano::pipeline::graphics::viewport::ViewportState;
+use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::render_pass::Framebuffer;
 use vulkano::render_pass::RenderPass;
+use vulkano::render_pass::Subpass;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{
@@ -123,29 +135,11 @@ impl Graphics
             command: None,
             image: None,
             compute_pipeline: None,
+            graphics_pipeline: None,
             descriptor_set: None,
             render_pass: None,
             frame_buffer: None,
         })
-    }
-
-    pub fn set_source_buffer(&mut self, source_content: Vec<u8>) {
-        let source = Buffer::from_iter(
-            self.mem_alloc.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            source_content,
-        )
-        .expect("failed to create source buffer");
-
-        self.source = Some(source);
     }
 
     pub fn set_destination_buffer(&mut self, destination_content: u32) {
@@ -276,6 +270,66 @@ impl Graphics
         )
         .expect("failed to create compute pipeline");
         self.compute_pipeline = Some(compute_pipeline);
+    }
+
+    pub fn set_graphics_pipeline(&mut self) {
+        let vs = vertex_shader::load(self.device.clone())
+            .expect("failed to create vertex shader")
+            .entry_point("main")
+            .unwrap();
+        let fs = fragment_shader::load(self.device.clone())
+            .expect("failed to create fragment shader")
+            .entry_point("main")
+            .unwrap();
+
+        let viewport = Viewport {
+            offset: [0.0, 0.0],
+            extent: [self.width as f32, self.height as f32],
+            depth_range: 0.0..=1.0,
+        };
+
+        let vertex_input_state = CustomVertex::per_vertex()
+            .definition(&vs.info().input_interface)
+            .unwrap();
+
+        let stages = [
+            PipelineShaderStageCreateInfo::new(vs),
+            PipelineShaderStageCreateInfo::new(fs),
+        ];
+
+        let layout = PipelineLayout::new(
+            self.device.clone(),
+            PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
+                .into_pipeline_layout_create_info(self.device.clone())
+                .unwrap(),
+        )
+        .unwrap();
+
+        let subpass = Subpass::from(self.render_pass.clone().unwrap(), 0).unwrap();
+        let graphics_pipeline = GraphicsPipeline::new(
+            self.device.clone(),
+            None,
+            GraphicsPipelineCreateInfo {
+                stages: stages.into_iter().collect(),
+                vertex_input_state: Some(vertex_input_state),
+                input_assembly_state: Some(InputAssemblyState::default()),
+                viewport_state: Some(ViewportState {
+                    viewports: [viewport].into_iter().collect(),
+                    ..Default::default()
+                }),
+                rasterization_state: Some(RasterizationState::default()),
+                multisample_state: Some(MultisampleState::default()),
+                color_blend_state: Some(ColorBlendState::with_attachment_states(
+                    subpass.num_color_attachments(),
+                    ColorBlendAttachmentState::default(),
+                )),
+                subpass: Some(subpass.into()),
+                ..GraphicsPipelineCreateInfo::layout(layout)
+            },
+        )
+        .unwrap();
+
+        self.graphics_pipeline = Some(graphics_pipeline);
     }
 
     pub fn add_descriptor_set_for_image(&mut self) {
